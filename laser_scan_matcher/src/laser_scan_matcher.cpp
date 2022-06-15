@@ -910,8 +910,7 @@ nav_msgs::Odometry LaserScanMatcher::calculate_odom(double x, double y, double t
     odom.pose.pose.orientation.y = q.getY();
     odom.pose.pose.orientation.z = q.getZ();
     odom.pose.pose.orientation.w = q.getW();
-    // odom.child_frame_id = ns_ + "_base_link2";
-    // odom.child_frame_id = ns_ + "_base_link2";
+    odom.child_frame_id = ns_ + "_base_link";
 
     double dt = _t - t;
     // calculate velocities
