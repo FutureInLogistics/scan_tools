@@ -48,6 +48,7 @@
 #include <geometry_msgs/TwistStamped.h>
 #include <nav_msgs/Odometry.h>
 #include <tf/transform_datatypes.h>
+#include <tf2/LinearMath/Quaternion.h>
 #include <tf/transform_listener.h>
 #include <tf/transform_broadcaster.h>
 #include <pcl/point_types.h>
@@ -91,6 +92,7 @@ class LaserScanMatcher
     tf::Transform base_to_laser_; // static, cached
     tf::Transform laser_to_base_; // static, cached, calculated from base_to_laser_
 
+    ros::Publisher  odom_pub_;
     ros::Publisher  pose_publisher_;
     ros::Publisher  pose_stamped_publisher_;
     ros::Publisher  pose_with_covariance_publisher_;
@@ -100,6 +102,7 @@ class LaserScanMatcher
 
     std::string base_frame_;
     std::string fixed_frame_;
+    std::string ns_;
     double cloud_range_min_;
     double cloud_range_max_;
     double cloud_res_;
@@ -128,6 +131,8 @@ class LaserScanMatcher
     bool use_vel_;
     bool stamped_vel_;
 
+    double _x, _y, _theta, x_, y_, _t;
+    std::string scan_topic_;
     // **** state variables
 
     boost::mutex mutex_;
@@ -156,6 +161,8 @@ class LaserScanMatcher
     sm_result output_;
     LDP prev_ldp_scan_;
 
+    int _counter;
+
     // **** methods
 
     void initParams();
@@ -183,6 +190,9 @@ class LaserScanMatcher
                        double& pr_ch_a, double dt);
 
     void createTfFromXYTheta(double x, double y, double theta, tf::Transform& t);
+
+    nav_msgs::Odometry calculate_odom(double x, double y, double theta, double t);
+
 };
 
 } // namespace scan_tools

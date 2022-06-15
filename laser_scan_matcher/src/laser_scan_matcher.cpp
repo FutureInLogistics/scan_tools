@@ -38,7 +38,7 @@
 #include <laser_scan_matcher/laser_scan_matcher.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <boost/assign.hpp>
-
+#include <fstream>
 namespace scan_tools
 {
 
@@ -54,8 +54,18 @@ LaserScanMatcher::LaserScanMatcher(ros::NodeHandle nh, ros::NodeHandle nh_privat
 
   // **** init parameters
 
+  ns_ = ros::this_node::getNamespace();
+  ns_.erase(std::remove(ns_.begin(), ns_.end(), '/'), ns_.end());
   initParams();
 
+  _counter = 0;
+  _x = 0;
+  _y = 0;
+  x_ = 0;
+  y_ = 0;
+  _t = 0;
+  _theta = 0;
+  odom_pub_ =  nh_.advertise<nav_msgs::Odometry>(scan_topic_ + "_odom", 1);
   // **** state variables
 
   f2b_.setIdentity();
@@ -105,13 +115,13 @@ LaserScanMatcher::LaserScanMatcher(ros::NodeHandle nh, ros::NodeHandle nh_privat
   else
   {
     scan_subscriber_ = nh_.subscribe(
-      "scan", 1, &LaserScanMatcher::scanCallback, this);
+      scan_topic_, 1, &LaserScanMatcher::scanCallback, this);
   }
 
   if (use_imu_)
   {
     imu_subscriber_ = nh_.subscribe(
-      "imu/data", 1, &LaserScanMatcher::imuCallback, this);
+      "imu", 1, &LaserScanMatcher::imuCallback, this);
   }
   if (use_odom_)
   {
@@ -125,7 +135,7 @@ LaserScanMatcher::LaserScanMatcher(ros::NodeHandle nh, ros::NodeHandle nh_privat
         "vel", 1, &LaserScanMatcher::velStmpCallback, this);
     else
       vel_subscriber_ = nh_.subscribe(
-        "vel", 1, &LaserScanMatcher::velCallback, this);
+        "cmd_vel", 1, &LaserScanMatcher::velCallback, this);
   }
 }
 
@@ -137,7 +147,7 @@ LaserScanMatcher::~LaserScanMatcher()
 void LaserScanMatcher::initParams()
 {
   if (!nh_private_.getParam ("base_frame", base_frame_))
-    base_frame_ = "base_link";
+    base_frame_ =  ns_ + "_base_link";
   if (!nh_private_.getParam ("fixed_frame", fixed_frame_))
     fixed_frame_ = "world";
 
@@ -178,11 +188,21 @@ void LaserScanMatcher::initParams()
   // If more than one is enabled, priority is imu > odom > vel
 
   if (!nh_private_.getParam ("use_imu", use_imu_))
-    use_imu_ = true;
+    use_imu_ = false;
   if (!nh_private_.getParam ("use_odom", use_odom_))
     use_odom_ = true;
   if (!nh_private_.getParam ("use_vel", use_vel_))
     use_vel_ = false;
+  if (!nh_private_.getParam ("x", x_))
+    x_ = 0.0;
+  if (!nh_private_.getParam ("y", y_))
+    y_ = 0.0;
+
+  ROS_INFO_STREAM("use_imu: "<<use_imu_);
+  ROS_INFO_STREAM("use_odom: "<<use_odom_);
+  ROS_INFO_STREAM("use_vel: "<<use_vel_);
+  ROS_INFO_STREAM("x: "<<x_);
+  ROS_INFO_STREAM("y: "<<y_);
 
   // **** Are velocity input messages stamped?
   // if false, will subscribe to Twist msgs on /vel
@@ -193,9 +213,11 @@ void LaserScanMatcher::initParams()
   // **** How to publish the output?
   // tf (fixed_frame->base_frame),
   // pose message (pose of base frame in the fixed frame)
-
+  if (!nh_private_.getParam ("scan", scan_topic_))
+    scan_topic_ = "frontscan";
+  else nh_private_.getParam ("scan", scan_topic_);
   if (!nh_private_.getParam ("publish_tf", publish_tf_))
-    publish_tf_ = true;
+    publish_tf_ = false;
   if (!nh_private_.getParam ("publish_pose", publish_pose_))
     publish_pose_ = true;
   if (!nh_private_.getParam ("publish_pose_stamped", publish_pose_stamped_))
@@ -402,6 +424,8 @@ void LaserScanMatcher::scanCallback (const sensor_msgs::LaserScan::ConstPtr& sca
 {
   // **** if first scan, cache the tf from base to the scanner
 
+
+
   if (!initialized_)
   {
     createCache(scan_msg);    // caches the sin and cos of all angles
@@ -600,7 +624,7 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
 
     if (publish_tf_)
     {
-      tf::StampedTransform transform_msg (f2b_, time, fixed_frame_, base_frame_);
+      tf::StampedTransform transform_msg (f2b_, time, fixed_frame_,ns_ +  "_" + scan_topic_ + "_frame");
       tf_broadcaster_.sendTransform (transform_msg);
     }
   }
@@ -630,6 +654,13 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
 
   double dur = (ros::WallTime::now() - start).toSec() * 1e3;
   ROS_DEBUG("Scan matcher total duration: %.1f ms", dur);
+
+  if (_t == 0)
+    auto o = calculate_odom(f2b_.getOrigin().getX(), f2b_.getOrigin().getY(), tf::getYaw(f2b_.getRotation()), dt );
+  else
+  odom_pub_.publish(calculate_odom(f2b_.getOrigin().getX(), f2b_.getOrigin().getY(), tf::getYaw(f2b_.getRotation()), dt));
+
+
 }
 
 bool LaserScanMatcher::newKeyframeNeeded(const tf::Transform& d)
@@ -850,10 +881,80 @@ void LaserScanMatcher::getPrediction(double& pr_ch_x, double& pr_ch_y,
 void LaserScanMatcher::createTfFromXYTheta(
   double x, double y, double theta, tf::Transform& t)
 {
-  t.setOrigin(tf::Vector3(x, y, 0.0));
+  if (!initialized_)
+    t.setOrigin(tf::Vector3(x+x_, y+y_, 0.0));
+  else
+    t.setOrigin(tf::Vector3(x, y, 0.0));
   tf::Quaternion q;
   q.setRPY(0.0, 0.0, theta);
   t.setRotation(q);
+}
+
+
+nav_msgs::Odometry LaserScanMatcher::calculate_odom(double x, double y, double theta, double t){
+    
+    // set odom
+
+    nav_msgs::Odometry odom;
+    odom.header.seq = _counter;
+    odom.header.stamp = ros::Time::now();
+
+
+    // odom.header.frame_id =  ns_ +  "_" + scan_topic_ + "_odom";
+    odom.header.frame_id =  ns_  + "_odom";
+    tf2::Quaternion q;
+    q.setRPY( 0, 0, theta );
+    odom.pose.pose.position.x = x;
+    odom.pose.pose.position.y = y;
+    odom.pose.pose.orientation.x = q.getX();
+    odom.pose.pose.orientation.y = q.getY();
+    odom.pose.pose.orientation.z = q.getZ();
+    odom.pose.pose.orientation.w = q.getW();
+    // odom.child_frame_id = ns_ + "_base_link2";
+    // odom.child_frame_id = ns_ + "_base_link2";
+
+    double dt = _t - t;
+    // calculate velocities
+    if (isnan(dt) || isinf(dt))
+      dt = 0.0;
+
+    double vx = (_x - x)/(dt);
+    double vy = (_y - y)/(dt);
+    double v_omega = (_theta - theta)/(dt);
+    double v = sqrt(pow(vx,2) + pow(vy,2));
+    
+    if (isnan(vx) || isinf(vx))
+      vx = 0.0;
+    if (isnan(vy) || isinf(vy))
+      vy = 0.0;
+    if (isnan(v) || isinf(v))
+      v = 0.0;
+    if (isnan(v_omega) || isinf(v_omega))
+      v_omega = 0.0;
+
+    //write data to csv file
+    std::ofstream outfile;
+
+    outfile.open("/home/timu/catkin_ws/velocities_fix.csv", std::ios_base::app);
+    outfile<<x<<", "<<y<<", "<<t<<", "<<vx<<", "<<vy<<", "<<v<<", "<<v_omega<<"\n";
+    outfile.close();
+
+    odom.twist.twist.linear.x = vx;
+    odom.twist.twist.linear.y = vy;
+    odom.twist.twist.angular.z = v_omega;
+    // odom.twist.twist.linear.z = v;
+
+    _counter++;
+
+    _x = x;
+    _y = y;
+    _theta = theta;
+    _t  = t;
+
+    return odom;
+
+
+
 }
 
 } // namespace scan_tools
