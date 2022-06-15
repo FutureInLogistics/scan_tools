@@ -131,7 +131,6 @@ class LaserScanMatcher
     bool use_vel_;
     bool stamped_vel_;
 
-    double _x, _y, _theta, x_, y_, _t;
     std::string scan_topic_;
     // **** state variables
 
@@ -146,6 +145,8 @@ class LaserScanMatcher
     tf::Transform f2b_kf_; // pose of the last keyframe scan in fixed frame
 
     ros::Time last_icp_time_;
+
+    double last_x, last_y, last_theta, last_t;
 
     sensor_msgs::Imu latest_imu_msg_;
     sensor_msgs::Imu last_used_imu_msg_;

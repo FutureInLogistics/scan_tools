@@ -56,15 +56,16 @@ LaserScanMatcher::LaserScanMatcher(ros::NodeHandle nh, ros::NodeHandle nh_privat
 
   ns_ = ros::this_node::getNamespace();
   ns_.erase(std::remove(ns_.begin(), ns_.end(), '/'), ns_.end());
+  
   initParams();
 
+  // init last position, angle, time
   _counter = 0;
-  _x = 0;
-  _y = 0;
-  x_ = 0;
-  y_ = 0;
-  _t = 0;
-  _theta = 0;
+  last_x = 0;
+  last_y = 0;
+  last_t = 0;
+  last_theta = 0;
+
   odom_pub_ =  nh_.advertise<nav_msgs::Odometry>(scan_topic_ + "_odom", 1);
   // **** state variables
 
@@ -193,16 +194,10 @@ void LaserScanMatcher::initParams()
     use_odom_ = true;
   if (!nh_private_.getParam ("use_vel", use_vel_))
     use_vel_ = false;
-  if (!nh_private_.getParam ("x", x_))
-    x_ = 0.0;
-  if (!nh_private_.getParam ("y", y_))
-    y_ = 0.0;
 
   ROS_INFO_STREAM("use_imu: "<<use_imu_);
   ROS_INFO_STREAM("use_odom: "<<use_odom_);
   ROS_INFO_STREAM("use_vel: "<<use_vel_);
-  ROS_INFO_STREAM("x: "<<x_);
-  ROS_INFO_STREAM("y: "<<y_);
 
   // **** Are velocity input messages stamped?
   // if false, will subscribe to Twist msgs on /vel
@@ -655,7 +650,7 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
   double dur = (ros::WallTime::now() - start).toSec() * 1e3;
   ROS_DEBUG("Scan matcher total duration: %.1f ms", dur);
 
-  if (_t == 0)
+  if (last_t == 0)
     auto o = calculate_odom(f2b_.getOrigin().getX(), f2b_.getOrigin().getY(), tf::getYaw(f2b_.getRotation()), dt );
   else
   odom_pub_.publish(calculate_odom(f2b_.getOrigin().getX(), f2b_.getOrigin().getY(), tf::getYaw(f2b_.getRotation()), dt));
@@ -882,7 +877,7 @@ void LaserScanMatcher::createTfFromXYTheta(
   double x, double y, double theta, tf::Transform& t)
 {
   if (!initialized_)
-    t.setOrigin(tf::Vector3(x+x_, y+y_, 0.0));
+    t.setOrigin(tf::Vector3(x, y, 0.0));
   else
     t.setOrigin(tf::Vector3(x, y, 0.0));
   tf::Quaternion q;
@@ -912,14 +907,14 @@ nav_msgs::Odometry LaserScanMatcher::calculate_odom(double x, double y, double t
     odom.pose.pose.orientation.w = q.getW();
     odom.child_frame_id = ns_ + "_base_link";
 
-    double dt = _t - t;
+    double dt = last_t - t;
     // calculate velocities
     if (isnan(dt) || isinf(dt))
       dt = 0.0;
 
-    double vx = (_x - x)/(dt);
-    double vy = (_y - y)/(dt);
-    double v_omega = (_theta - theta)/(dt);
+    double vx = (last_x - x)/(dt);
+    double vy = (last_y - y)/(dt);
+    double v_omega = (last_theta - theta)/(dt);
     double v = sqrt(pow(vx,2) + pow(vy,2));
     
     if (isnan(vx) || isinf(vx))
@@ -934,7 +929,7 @@ nav_msgs::Odometry LaserScanMatcher::calculate_odom(double x, double y, double t
     //write data to csv file
     std::ofstream outfile;
 
-    outfile.open("/home/timu/catkin_ws/velocities_fix.csv", std::ios_base::app);
+    outfile.open("velocities.csv", std::ios_base::app);
     outfile<<x<<", "<<y<<", "<<t<<", "<<vx<<", "<<vy<<", "<<v<<", "<<v_omega<<"\n";
     outfile.close();
 
@@ -945,10 +940,10 @@ nav_msgs::Odometry LaserScanMatcher::calculate_odom(double x, double y, double t
 
     _counter++;
 
-    _x = x;
-    _y = y;
-    _theta = theta;
-    _t  = t;
+    last_x = x;
+    last_y = y;
+    last_theta = theta;
+    last_t  = t;
 
     return odom;
 
